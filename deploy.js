@@ -2,8 +2,8 @@ const { execSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const sourceDir = "D:\\test"; // 填写你的 hexo 项目目录
-const targetDir = "C:\\Users\\wangzijian\\Desktop\\新建文件夹"; // 填写你的目标 git 目录
+const sourceDir = "D:\\blog\\test"; // 填写你的 hexo 项目目录
+const targetDir = "D:\\blog\\根目录"; // 填写你的目标 git 目录
 
 function run(cmd, cwd = process.cwd()) {
     console.log(`运行命令: ${cmd} (cwd: ${cwd})`);
