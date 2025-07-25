@@ -1,5 +1,5 @@
-//- intro height , you can input other number in _config.yml
-- let introHeight = typeof theme.intro_height === 'number' ? theme.intro_height : 60
+//- intro height, you can input other number in _config.yml
+- let introHeight = typeof theme.intro_height === 'number' ? theme.intro_height : 70
 - let introStyle = `height: ${introHeight}vh;`
 //- site haeder image url
 - let bgURL = ''
@@ -13,46 +13,195 @@ else if (page.layout === 'about')
   - bgURL = theme.about_header_image || theme.site_header_image
 else if (is_archive())
   - bgURL = theme.archive_header_image || theme.site_header_image
-else 
+else
   - bgURL = theme.site_header_image
-- let bgStyle =  `background-image: url(${bgURL});`
+- let bgStyle = `background-image: url(${bgURL});`
+
 header#cxo-intro(style= introStyle + bgStyle)
   include nav.pug
-  - if (is_post()){
+  
+  //- 标题逻辑
+  if (is_post())
     h1.post-title= page.title
-  - } else {
+  else
     h1= theme.main_title || config.title
     h5= theme.subtitle
-  - }
-  - if (is_post()){
+
+  //- START: Interactive Ripple Title Logic
+  //- 仅在文章页并且在主题配置中开启了涟漪效果时执行
+  if is_post() && theme.ripple_title && theme.ripple_title.enable
+    //- 涟漪效果的容器和Canvas，它将被JS定位
+    div#ripple-title-wrapper
+      canvas.ripple-canvas
+
+    //- 涟漪效果的样式 + 隐藏原始标题的样式
+    style.
+      #ripple-title-wrapper {
+        position: absolute; /* 相对于父元素header定位 */
+        pointer-events: none;
+        z-index: 10;
+      }
+      #ripple-title-wrapper .ripple-canvas {
+        position: absolute; top: 0; left: 0;
+        width: 100%; height: 100%;
+      }
+      /* 关键：强制隐藏由 markdown 生成的重复标题 */
+      #cxo-content-inner .post-title,
+      #cxo-content-inner h1:first-of-type {
+        display: none !important;
+      }
+
+    //- 涟漪效果的脚本
+    script(type="module").
+      import * as THREE from "https://esm.sh/three@0.158.0";
+      
+      document.addEventListener('DOMContentLoaded', () => {
+        const titleElement = document.querySelector('header#cxo-intro h1.post-title'); 
+        
+        if (!titleElement) {
+          console.error("Ripple Title: Could not find 'h1.post-title' element inside the header.");
+        } else {
+          const wrapper = document.getElementById('ripple-title-wrapper');
+          if (wrapper) {
+            const parent = titleElement.parentElement;
+            if (getComputedStyle(parent).position === 'static') { parent.style.position = 'relative'; }
+            
+            Object.assign(wrapper.style, {
+              top: titleElement.offsetTop + 'px',
+              left: titleElement.offsetLeft + 'px',
+              width: titleElement.offsetWidth + 'px',
+              height: titleElement.offsetHeight + 'px'
+            });
+
+            let scene, camera, renderer, plane, raycaster, hitPlane;
+            const pointer = new THREE.Vector2();
+            let titleTexture = new THREE.CanvasTexture(document.createElement('canvas'));
+            
+            function init() {
+              scene = new THREE.Scene();
+              const aspect = wrapper.clientWidth / wrapper.clientHeight;
+              const camera_distance = wrapper.clientHeight / 2;
+              camera = new THREE.OrthographicCamera(-camera_distance * aspect, camera_distance * aspect, camera_distance, -camera_distance, 0.01, 1000);
+              camera.position.set(0, 0, 10);
+              camera.lookAt(0, 0, 0);
+
+              const canvas = wrapper.querySelector('.ripple-canvas');
+              renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+              renderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
+              renderer.setPixelRatio(window.devicePixelRatio);
+              
+              raycaster = new THREE.Raycaster();
+              hitPlane = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshBasicMaterial());
+              hitPlane.visible = false; scene.add(hitPlane);
+
+              createTextTexture();
+              createPlane();
+
+              window.addEventListener("resize", onWindowResize);
+              wrapper.addEventListener("pointermove", onPointerMove);
+              wrapper.style.pointerEvents = 'auto';
+
+              animate();
+            }
+
+            function createTextTexture() {
+              const canvas = document.createElement('canvas'); const context = canvas.getContext('2d');
+              const style = getComputedStyle(titleElement);
+              const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+              
+              const dpr = window.devicePixelRatio;
+              const canvasWidth = wrapper.clientWidth * dpr;
+              const canvasHeight = wrapper.clientHeight * dpr;
+              
+              canvas.width = canvasWidth; canvas.height = canvasHeight;
+              context.scale(dpr, dpr);
+
+              context.font = font; context.fillStyle = style.color;
+              context.textAlign = 'center'; context.textBaseline = 'middle';
+              
+              context.fillText(titleElement.innerText, wrapper.clientWidth / 2, wrapper.clientHeight / 2);
+              
+              titleElement.style.opacity = '0'; // 隐藏原始标题
+              titleTexture.image = canvas; titleTexture.needsUpdate = true;
+            }
+
+            function createPlane() {
+              const geometry = new THREE.PlaneGeometry(wrapper.clientWidth, wrapper.clientHeight, 100, 50);
+              const shaderMaterial = new THREE.ShaderMaterial({
+                uniforms: { uTexture: { value: titleTexture }, uDisplacement: { value: new THREE.Vector3(0, 0, 0) } },
+                vertexShader: `
+                  varying vec2 vUv; uniform vec3 uDisplacement;
+                  float easeInOutCubic(float x) { return x < 0.5 ? 4. * x * x * x : 1. - pow(-2. * x + 2., 3.) / 2.; }
+                  float map(float value, float min1, float max1, float min2, float max2) { return min2 + (value - min1) * (max2 - min2) / (max1 - min1); }
+                  void main() {
+                    vUv = uv; vec3 new_position = position;
+                    float dist = length(uDisplacement.xy - position.xy);
+                    float min_distance = 80.0;
+                    if (dist < min_distance) {
+                      float mapped_dist = map(dist, 0., min_distance, 1., 0.);
+                      float ripple_strength = easeInOutCubic(mapped_dist) * 15.0;
+                      new_position.z += ripple_strength;
+                    }
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(new_position, 1.0);
+                  }
+                `,
+                fragmentShader: `varying vec2 vUv; uniform sampler2D uTexture; void main() { gl_FragColor = texture2D(uTexture, vUv); }`,
+                transparent: true, depthWrite: false
+              });
+              plane = new THREE.Mesh(geometry, shaderMaterial); scene.add(plane);
+            }
+
+            function onPointerMove(event) {
+              const rect = wrapper.getBoundingClientRect();
+              pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+              pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+              raycaster.setFromCamera(pointer, camera);
+              const intersects = raycaster.intersectObject(hitPlane);
+              if (intersects.length > 0) { plane.material.uniforms.uDisplacement.value.copy(intersects[0].point); }
+            }
+
+            function onWindowResize() {
+              Object.assign(wrapper.style, {
+                top: titleElement.offsetTop + 'px', left: titleElement.offsetLeft + 'px',
+                width: titleElement.offsetWidth + 'px', height: titleElement.offsetHeight + 'px',
+              });
+              const aspect = wrapper.clientWidth / wrapper.clientHeight;
+              const camera_distance = wrapper.clientHeight / 2;
+              camera.left = -camera_distance * aspect; camera.right = camera_distance * aspect;
+              camera.top = camera_distance; camera.bottom = -camera_distance; camera.updateProjectionMatrix();
+              renderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
+              createTextTexture(); scene.remove(plane); createPlane();
+            }
+
+            function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+            init();
+          }
+        }
+      });
+
+  //- 文章的元信息 (日期、标签等)
+  if (is_post())
     .post-intros
       .post-intro-meta
         span.post-intro-time
           - let format = theme.date_format ? theme.date_format : date_format
-          - if(theme.display_updated) {
+          if(theme.display_updated)
             i.post-intro-calendar.fa.fa-edit
             span= date(page.updated, format)
-          - } else {
+          else
             i.post-intro-calendar.fa.fa-calendar
             span= date(page.date, format)
-          - } 
         if(theme.busuanzi)
           span#busuanzi_container_page_pv.busuanzi-pv
             i.post-intro-calendar.fa.fa-user-o
             span#busuanzi_value_page_pv
-        if(page.tags.length) 
-          span.post-intro-tags!= partial('./includes/partial/tag', {currPost: page,className: 'intro-tag'})
-      if(theme.reading_info)
-        .post-intro-read
-          span 
-            | Word count: 
-            span.post-count= wordcount(page.content)
-            |  | Reading time: 
-            span.post-count= min2read(page.content)
-            | min
-  - }
-  - if (!is_post()){
-    .intro-social
-      include social.pug
-  - }
-    
+        if(page.tags.length)
+          span.post-intro-tags!= partial('../includes/partial/tag', {currP: page, type: 'post'})
+        if(theme.reading_info)
+          .post-intro-read
+            span
+              | Word count: 
+              span.post-count= wordcount(page.content)
+            span
+              | Reading time: 
+              span.post-count= min2read(page.content)
