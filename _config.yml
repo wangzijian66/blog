@@ -102,3 +102,8 @@ theme: Cxo
 ## Docs: https://hexo.io/docs/one-command-deployment
 deploy:
   type: ''
+
+# —————————— Ripple Title —————————— #
+# enable interactive ripple effect for post titles
+ripple_title:
+  enable: true
